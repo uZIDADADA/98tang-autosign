@@ -291,6 +291,8 @@ class ConfigManager:
             "reply_messages": self._config["reply_messages"],
             "comment_interval": self._config["comment_interval"],
             "wait_after_login": self._config["wait_after_login"],
+            "use_deepseek": self._config["use_deepseek"],
+            "deepseek_api_key": self._config["deepseek_api_key"],
         }
 
     def get_timing_config(self) -> Dict[str, Any]:

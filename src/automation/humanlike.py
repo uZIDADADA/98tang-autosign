@@ -6,6 +6,7 @@
 
 import random
 import logging
+import requests
 from typing import List, Dict, Optional, Any
 from urllib.parse import urljoin
 
@@ -232,8 +233,10 @@ class HumanlikeBehavior:
 
             # 填写回复内容
             if self.config.get("use_deepseek", False):
+                 self.logger.info("⚡ 使用 DeepSeek 生成回复")
                  reply_text = self._generate_reply_with_deepseek(post_info["title"])
             else:
+                 self.logger.info("⚡ 随机回复")
                  reply_text = random.choice(self.reply_messages)
 
             self.logger.info(f"生成的回复内容: {reply_text}")

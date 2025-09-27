@@ -178,6 +178,19 @@
 - **说明**: 登录后等待时间（秒，模拟人工操作）
 - **示例**: `WAIT_AFTER_LOGIN=5`
 
+### USE_DEEPSEEK
+- **类型**: 布尔
+- **默认值**: `false`
+- **说明**: 是否通过DeepSeek AI生成回复内容（需要配置DEEPSEEK_API_KEY）
+- **示例**: `### USE_DEEPSEEK=true`
+
+
+### DEEPSEEK_API_KEY
+- **类型**: 字符串
+- **默认值**: `无`
+- **说明**:  DeepSeek AI的API Key（前往https://www.deepseek.ai/注册获取）
+- **示例**: `### DEEPSEEK_API_KEY=sk-****`
+
 ---
 
 ## ⚡ 高级配置（通常不需要修改）
