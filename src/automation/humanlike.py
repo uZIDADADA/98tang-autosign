@@ -527,6 +527,12 @@ class HumanlikeBehavior:
             data = resp.json()
             reply_text = data["choices"][0]["message"]["content"].strip()
 
+            # ⚠️ 兜底：过滤掉官方拒答
+            if not reply_text or "不良内容" in reply_text or "不予置评" in reply_text:
+                self.logger.warning("DeepSeek 返回了官方拒答，改用随机回复")
+                if self.reply_messages:
+                   return random.choice(self.reply_messages)
+                return "支持一下"
             # 避免空结果
             if not reply_text:
                 raise ValueError("空回复")
