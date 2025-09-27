@@ -84,7 +84,11 @@ jobs:
         ENABLE_SECURITY_QUESTION: ${{ vars.ENABLE_SECURITY_QUESTION || 'false' }}
         SECURITY_QUESTION: ${{ secrets.SECURITY_QUESTION }}
         SECURITY_ANSWER: ${{ secrets.SECURITY_ANSWER }}
-        
+
+        # AI 回复配置
+        USE_DEEPSEEK: ${{ vars.USE_DEEPSEEK || 'false' }}
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
         # 核心功能配置
         BASE_URL: ${{ vars.BASE_URL || 'https://www.sehuatang.org' }}
         ENABLE_CHECKIN: ${{ vars.ENABLE_CHECKIN || 'true' }}
@@ -116,7 +120,7 @@ jobs:
         MAX_LOG_FILES: ${{ vars.MAX_LOG_FILES || '7' }}
         MAX_RETRIES: ${{ vars.MAX_RETRIES || '3' }}
         TIMEOUT_MINUTES: ${{ vars.TIMEOUT_MINUTES || '5' }}
-        
+
         # 中文字体和编码支持
         LANG: 'zh_CN.UTF-8'
         LC_ALL: 'zh_CN.UTF-8'

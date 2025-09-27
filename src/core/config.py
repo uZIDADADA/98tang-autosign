@@ -151,6 +151,14 @@ class ConfigManager:
             }
         )
 
+        # AI 回复配置（DeepSeek）
+        self._config.update(
+            {
+                "use_deepseek": os.getenv("USE_DEEPSEEK", "false").lower() == "true",
+                "deepseek_api_key": os.getenv("DEEPSEEK_API_KEY", "").strip(),
+            }
+        )
+
         # 验证必要配置
         self._validate_config()
 

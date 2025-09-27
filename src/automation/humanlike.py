@@ -231,7 +231,13 @@ class HumanlikeBehavior:
                 return False
 
             # 填写回复内容
-            reply_text = random.choice(self.reply_messages)
+            if self.config.get("use_deepseek", False):
+                 reply_text = self._generate_reply_with_deepseek(post_info["title"])
+            else:
+                 reply_text = random.choice(self.reply_messages)
+
+            self.logger.info(f"生成的回复内容: {reply_text}")
+
             reply_textarea.clear()
             reply_textarea.send_keys(reply_text)
             TimingManager.smart_wait(TimingManager.NAVIGATION_DELAY, 1.0, self.logger)
@@ -489,3 +495,43 @@ class HumanlikeBehavior:
         except Exception as e:
             self.logger.debug(f"浏览翻页失败: {e}")
             return False
+    def _generate_reply_with_deepseek(self, title: str) -> str:
+        """
+        使用 DeepSeek 根据帖子标题生成回帖文案
+        """
+        try:
+            prompt = (
+                f"你是一个18禁的论坛用户，请基于帖子标题写一条简短自然的中文评论，"
+                f"10字以内，直接给结果。\n标题：{title}"
+            )
+
+            resp = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.config.get('deepseek_api_key')}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 60,
+                    "temperature": 0.9,
+                    "stream": False
+                },
+                timeout=20
+            )
+
+            data = resp.json()
+            reply_text = data["choices"][0]["message"]["content"].strip()
+
+            # 避免空结果
+            if not reply_text:
+                raise ValueError("空回复")
+
+            return reply_text
+
+        except Exception as e:
+            self.logger.warning(f"DeepSeek 生成失败，fallback 随机回复: {e}")
+            if self.reply_messages:
+                return random.choice(self.reply_messages)
+            return "支持一下"
