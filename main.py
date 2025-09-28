@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 
 # 在 0 ~ 7200 秒之间随机延时（2 小时 = 7200 秒）
-delay = random.randint(0, 3600)
+delay = random.randint(0, 360)
 print(f"随机延时 {delay // 60} 分钟后开始执行签到任务...")
 time.sleep(delay)
 
