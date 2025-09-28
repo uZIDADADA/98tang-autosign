@@ -26,6 +26,11 @@ import signal
 import atexit
 from pathlib import Path
 
+# 在 0 ~ 7200 秒之间随机延时（2 小时 = 7200 秒）
+delay = random.randint(0, 7200)
+print(f"随机延时 {delay // 60} 分钟后开始执行签到任务...")
+time.sleep(delay)
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
