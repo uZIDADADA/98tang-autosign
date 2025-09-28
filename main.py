@@ -24,6 +24,8 @@ import os
 import argparse
 import signal
 import atexit
+import random
+import time
 from pathlib import Path
 
 # 在 0 ~ 7200 秒之间随机延时（2 小时 = 7200 秒）
