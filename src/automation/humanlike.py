@@ -498,6 +498,7 @@ class HumanlikeBehavior:
         except Exception as e:
             self.logger.debug(f"浏览翻页失败: {e}")
             return False
+
     def _generate_reply_with_deepseek(self, title: str) -> str:
         """
         使用 DeepSeek 根据帖子标题生成回帖文案
@@ -505,7 +506,7 @@ class HumanlikeBehavior:
         try:
             prompt = (
                 f"你是一个18禁的论坛用户，请基于帖子标题写一条简短自然的中文评论，"
-                f"10字以内，直接给结果。\n标题：{title}"
+                f"要求长度在11到20字之间，直接给结果。\n标题：{title}"
             )
 
             resp = requests.post(
@@ -527,20 +528,22 @@ class HumanlikeBehavior:
             data = resp.json()
             reply_text = data["choices"][0]["message"]["content"].strip()
 
-            # ⚠️ 兜底：过滤掉官方拒答
-            if not reply_text or "不良内容" in reply_text or "不予置评" in reply_text:
-                self.logger.warning("DeepSeek 返回了官方拒答，改用随机回复")
-                if self.reply_messages:
-                   return random.choice(self.reply_messages)
-                return "支持一下"
-            # 避免空结果
-            if not reply_text:
-                raise ValueError("空回复")
+            # 🚨 拒答/无效关键词列表
+            INVALID_KEYWORDS = [
+                "不良内容", "不予置评", "不符合平台规范",
+                "无法提供", "拒绝", "违规", "不支持",
+                "敏感内容", "无法回答", "评论"
+            ]
+
+            # 🚨 校验：空、拒答、太短
+            if (not reply_text
+                    or len(reply_text) < 10
+                    or any(kw in reply_text for kw in INVALID_KEYWORDS)):
+                self.logger.warning(f"DeepSeek 回复无效/过短/拒答: {reply_text}")
+                return random.choice(self.reply_messages) if self.reply_messages else "支持一下"
 
             return reply_text
 
         except Exception as e:
             self.logger.warning(f"DeepSeek 生成失败，fallback 随机回复: {e}")
-            if self.reply_messages:
-                return random.choice(self.reply_messages)
-            return "支持一下"
+            return random.choice(self.reply_messages) if self.reply_messages else "支持一下"
