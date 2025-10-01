@@ -1,13 +1,20 @@
-"""
-浏览器驱动管理模块
 
-负责创建和管理WebDriver实例
+"""
+浏览器驱动管理模块（已修复：自动匹配 Chrome/Chromedriver 主版本，失败后重试）
+
+功能亮点：
+- 支持 undetected_chromedriver (优先) 或标准 selenium
+- 捕获 "session not created" 版本不匹配错误，自动解析当前 Chrome 主版本并精确安装对应 chromedriver 后重试
+- 兼容 CI：自动附加稳定参数，可通过环境变量指定 Chrome 二进制
+- 安全关闭：SafeChrome 包装器避免 __del__/句柄异常
 """
 
 import logging
+import os
+import re
 from typing import Optional, Dict, Any
 
-# 浏览器自动化导入
+# 浏览器自动化导入（优先使用 undetected_chromedriver）
 try:
     import undetected_chromedriver as uc
     from selenium.webdriver.common.by import By
@@ -19,16 +26,15 @@ try:
         WebDriverException,
     )
 
-    # 修复undetected_chromedriver的__del__方法以防止句柄错误
+    # 修复 undetected_chromedriver 的 __del__ 以防止句柄错误
     def safe_del(self):
         """安全的析构方法，避免句柄无效错误"""
         try:
             if hasattr(self, "_is_patched") and self._is_patched:
-                return  # 已经被安全关闭，不再处理
-        except:
+                return
+        except Exception:
             pass
 
-    # 应用补丁
     if hasattr(uc.Chrome, "__del__"):
         uc.Chrome.__del__ = safe_del
 
@@ -46,27 +52,24 @@ except ImportError:
             NoSuchElementException,
             WebDriverException,
         )
-
         UNDETECTED_AVAILABLE = False
     except ImportError:
-        raise ImportError("请安装selenium: pip install selenium")
+        raise ImportError("请安装 selenium：pip install selenium")
 
 
 class SafeChrome:
-    """安全Chrome驱动包装器"""
+    """安全 Chrome 驱动包装器，防止析构时异常"""
 
     def __init__(self, driver):
         self._driver = driver
         self._is_closed = False
 
     def __getattr__(self, name):
-        """代理所有属性访问到原始driver"""
         if self._is_closed:
             raise RuntimeError("Driver has been closed")
         return getattr(self._driver, name)
 
     def close(self):
-        """关闭浏览器窗口"""
         if not self._is_closed and self._driver:
             try:
                 self._driver.close()
@@ -74,11 +77,13 @@ class SafeChrome:
                 pass
 
     def quit(self):
-        """退出Chrome驱动"""
         if not self._is_closed and self._driver:
             try:
-                # 标记已被安全关闭，防止__del__重复处理
-                self._driver._is_patched = True
+                # 标记已被安全关闭，防止 __del__ 重复处理
+                try:
+                    self._driver._is_patched = True
+                except Exception:
+                    pass
                 self._driver.quit()
             except Exception:
                 pass
@@ -87,152 +92,189 @@ class SafeChrome:
                 self._driver = None
 
     def __del__(self):
-        """析构函数，防止垃圾回收器错误"""
-        # 什么都不做，避免在析构时出现错误
+        # 避免在垃圾回收时出现句柄错误
         pass
 
 
 class BrowserDriverManager:
-    """浏览器驱动管理器"""
+    """浏览器驱动管理器（支持自动版本匹配与重试）"""
 
     def __init__(self, logger: Optional[logging.Logger] = None):
-        """
-        初始化浏览器驱动管理器
-
-        Args:
-            logger: 日志器
-        """
         self.logger = logger or logging.getLogger(__name__)
         self.driver: Optional[SafeChrome] = None
         self._is_cleanup_done = False
         self.wait: Optional[WebDriverWait] = None
 
+    def _build_options(self, headless: bool):
+        """构建 Chrome 选项（兼容 uc 与 selenium）"""
+        if UNDETECTED_AVAILABLE:
+            options = uc.ChromeOptions()
+        else:
+            options = Options()
+
+        # Headless：新版 Chrome 建议 --headless=new
+        if headless:
+            try:
+                options.add_argument("--headless=new")
+            except Exception:
+                options.add_argument("--headless")
+            self.logger.debug("启用无头模式")
+        else:
+            self.logger.debug("使用有头模式（显示浏览器窗口）")
+
+        # 通用参数
+        browser_args = [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "--disable-popup-blocking",
+        ]
+
+        # CI 环境参数
+        if os.getenv("GITHUB_ACTIONS") or os.getenv("CI"):
+            self.logger.debug("检测到 CI 环境，添加额外配置")
+            ci_args = [
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-features=TranslateUI",
+                "--disable-ipc-flooding-protection",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-default-apps",
+                "--disable-extensions",
+                "--disable-plugins",
+                "--disable-sync",
+                "--disable-translate",
+                "--hide-scrollbars",
+                "--mute-audio",
+                "--no-zygote",
+                "--disable-background-networking",
+                "--disable-web-security",
+                "--allow-running-insecure-content",
+                "--window-size=1920,1080",
+                "--font-render-hinting=none",
+                "--disable-font-subpixel-positioning",
+                "--force-device-scale-factor=1",
+            ]
+            browser_args.extend(ci_args)
+
+        for arg in browser_args:
+            try:
+                if UNDETECTED_AVAILABLE and hasattr(options, "add_argument"):
+                    options.add_argument(arg)
+                elif not UNDETECTED_AVAILABLE:
+                    options.add_argument(arg)
+                self.logger.debug(f"添加浏览器参数: {arg}")
+            except Exception:
+                pass
+
+        # 浏览器偏好
+        prefs = {
+            "profile.default_content_setting_values": {"popups": 1},
+            # 中文字体配置
+            "webkit.webprefs.fonts.standard.Hans": "SimSun",
+            "webkit.webprefs.fonts.serif.Hans": "SimSun",
+            "webkit.webprefs.fonts.sansserif.Hans": "SimHei",
+            "webkit.webprefs.fonts.cursive.Hans": "SimSun",
+            "webkit.webprefs.fonts.fantasy.Hans": "SimSun",
+            "webkit.webprefs.fonts.pictograph.Hans": "SimSun",
+            "webkit.webprefs.default_encoding": "UTF-8",
+        }
+        if os.getenv("GITHUB_ACTIONS") or os.getenv("CI"):
+            prefs.update({
+                "webkit.webprefs.fonts.standard.Hans": "Noto Sans CJK SC",
+                "webkit.webprefs.fonts.serif.Hans": "Noto Serif CJK SC",
+                "webkit.webprefs.fonts.sansserif.Hans": "Noto Sans CJK SC",
+                "webkit.webprefs.fonts.cursive.Hans": "Noto Sans CJK SC",
+                "webkit.webprefs.fonts.fantasy.Hans": "Noto Sans CJK SC",
+                "webkit.webprefs.fonts.pictograph.Hans": "Noto Sans CJK SC",
+            })
+            self.logger.debug("配置 CI 环境中文字体偏好")
+        try:
+            options.add_experimental_option("prefs", prefs)
+            self.logger.debug("配置浏览器偏好设置: 弹出窗口允许、中文字体支持")
+        except Exception:
+            pass
+
+        # 指定 Chrome 二进制（CI/容器常用）
+        binary = os.getenv("CHROME_BINARY") or os.getenv("GOOGLE_CHROME_SHIM")
+        if binary:
+            try:
+                options.binary_location = binary
+                self.logger.debug(f"使用指定 Chrome 二进制: {binary}")
+            except Exception:
+                self.logger.debug("设置 binary_location 失败，忽略")
+
+        return options
+
+    def _init_driver_uc(self, options):
+        """优先用 undetected_chromedriver 初始化，遇版本不匹配自动重试"""
+        try:
+            return uc.Chrome(options=options)
+        except Exception as e:
+            msg = str(e)
+            # 从报错信息里提取 “driver 支持版本” 和 “当前浏览器版本”
+            m = re.search(
+                r"supports Chrome version\s*(\d+).*?Current browser version is\s*(\d+)",
+                msg,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            # 也兼容只出现 supports 或只出现 current 的情况
+            m_current = re.search(
+                r"Current browser version is\s*(\d+)", msg, flags=re.IGNORECASE
+            )
+            curr_major = None
+            if m and m.group(2):
+                curr_major = int(m.group(2))
+            elif m_current and m_current.group(1):
+                curr_major = int(m_current.group(1))
+
+            if curr_major:
+                self.logger.warning(
+                    f"检测到 Chrome/Chromedriver 主版本不匹配，按当前浏览器 {curr_major} 版本重试……"
+                )
+                # 精确安装匹配主版本的 chromedriver
+                driver_path = uc.install(version_main=curr_major)
+                return uc.Chrome(options=options, driver_executable_path=driver_path)
+
+            # 未能提取版本时，抛出原始异常
+            raise
+
     def create_driver(self, config: Dict[str, Any]) -> bool:
-        """
-        创建浏览器驱动
+        """创建浏览器驱动（自动匹配版本）
 
         Args:
-            config: 浏览器配置
-
+            config: 浏览器配置，如 {"headless": True}
         Returns:
             是否创建成功
         """
         try:
             self.logger.info("开始创建浏览器驱动")
-
-            headless = config.get("headless", True)
-
-            if UNDETECTED_AVAILABLE:
-                self.logger.info("使用undetected-chromedriver创建浏览器")
-                options = uc.ChromeOptions()
-            else:
-                self.logger.info("使用标准selenium创建浏览器")
-                options = Options() if not UNDETECTED_AVAILABLE else uc.ChromeOptions()
-
-            # 基础配置
-            if headless:
-                options.add_argument("--headless")
-                self.logger.debug("启用无头模式")
-            else:
-                self.logger.debug("使用有头模式（显示浏览器窗口）")
-
-            # 添加浏览器选项
-            browser_args = [
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "--disable-popup-blocking",
-            ]
-
-            # Github Action 和 CI 环境的额外配置
-            import os
-
-            if os.getenv("GITHUB_ACTIONS") or os.getenv("CI"):
-                self.logger.debug("检测到CI环境，添加额外配置")
-                ci_args = [
-                    "--disable-gpu",
-                    "--disable-software-rasterizer",
-                    "--disable-background-timer-throttling",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-renderer-backgrounding",
-                    "--disable-features=TranslateUI",
-                    "--disable-ipc-flooding-protection",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--disable-default-apps",
-                    "--disable-extensions",
-                    "--disable-plugins",
-                    "--disable-sync",
-                    "--disable-translate",
-                    "--hide-scrollbars",
-                    "--mute-audio",
-                    "--no-zygote",
-                    "--disable-background-networking",
-                    "--disable-web-security",
-                    "--allow-running-insecure-content",
-                    "--window-size=1920,1080",
-                    # 中文字体支持配置
-                    "--font-render-hinting=none",
-                    "--disable-font-subpixel-positioning",
-                    "--force-device-scale-factor=1",
-                ]
-                browser_args.extend(ci_args)
-
-            for arg in browser_args:
-                options.add_argument(arg)
-                self.logger.debug(f"添加浏览器参数: {arg}")
-
-            # 配置浏览器偏好设置
-            prefs = {
-                "profile.default_content_setting_values": {"popups": 1},
-                # 中文字体配置
-                "webkit.webprefs.fonts.standard.Hans": "SimSun",
-                "webkit.webprefs.fonts.serif.Hans": "SimSun",
-                "webkit.webprefs.fonts.sansserif.Hans": "SimHei",
-                "webkit.webprefs.fonts.cursive.Hans": "SimSun",
-                "webkit.webprefs.fonts.fantasy.Hans": "SimSun",
-                "webkit.webprefs.fonts.pictograph.Hans": "SimSun",
-                "webkit.webprefs.default_encoding": "UTF-8",
-            }
-
-            # CI环境的额外字体配置
-            if os.getenv("GITHUB_ACTIONS") or os.getenv("CI"):
-                # 在CI环境中，使用系统可能安装的中文字体
-                ci_font_prefs = {
-                    "webkit.webprefs.fonts.standard.Hans": "Noto Sans CJK SC",
-                    "webkit.webprefs.fonts.serif.Hans": "Noto Serif CJK SC",
-                    "webkit.webprefs.fonts.sansserif.Hans": "Noto Sans CJK SC",
-                    "webkit.webprefs.fonts.cursive.Hans": "Noto Sans CJK SC",
-                    "webkit.webprefs.fonts.fantasy.Hans": "Noto Sans CJK SC",
-                    "webkit.webprefs.fonts.pictograph.Hans": "Noto Sans CJK SC",
-                }
-                prefs.update(ci_font_prefs)
-                self.logger.debug("配置CI环境中文字体偏好")
-
-            options.add_experimental_option("prefs", prefs)
-            self.logger.debug("配置浏览器偏好设置: 弹出窗口允许、中文字体支持")
+            headless = bool(config.get("headless", True))
+            options = self._build_options(headless=headless)
 
             # 创建驱动
             self.logger.debug("开始初始化浏览器实例")
             if UNDETECTED_AVAILABLE:
-                raw_driver = uc.Chrome(options=options)
+                raw_driver = self._init_driver_uc(options)
             else:
+                # Selenium Manager 会自动解析并下载合适的驱动
                 raw_driver = webdriver.Chrome(options=options)
 
-            # 使用安全包装器
+            # 包装为安全驱动
             self.driver = SafeChrome(raw_driver)
+            self.wait = WebDriverWait(self.driver, int(config.get("wait_timeout", 10)))
 
-            self.wait = WebDriverWait(self.driver, 10)
-
-            # 获取浏览器信息
+            # 记录版本信息
             try:
-                browser_version = self.driver.capabilities.get(
-                    "browserVersion", "Unknown"
-                )
-                driver_version = self.driver.capabilities.get("chrome", {}).get(
-                    "chromedriverVersion", "Unknown"
-                )
+                caps = getattr(self.driver, "capabilities", {}) or {}
+                browser_version = caps.get("browserVersion") or caps.get("version") or "Unknown"
+                chrome_info = caps.get("chrome") or {}
+                driver_version = chrome_info.get("chromedriverVersion") or "Unknown"
                 self.logger.debug(f"浏览器版本: {browser_version}")
                 self.logger.debug(f"驱动版本: {driver_version}")
             except Exception as e:
@@ -246,30 +288,24 @@ class BrowserDriverManager:
             return False
 
     def get_driver(self):
-        """获取WebDriver实例"""
         return self.driver
 
     def get_wait(self) -> Optional[WebDriverWait]:
-        """获取WebDriverWait实例"""
         return self.wait
 
     def quit_driver(self) -> None:
         """关闭浏览器驱动"""
         if self.driver and not self._is_cleanup_done:
             try:
-                # 先尝试关闭所有窗口
                 try:
                     self.driver.close()
                 except Exception:
-                    pass  # 忽略关闭窗口的错误
-
-                # 然后退出驱动
+                    pass
                 self.driver.quit()
                 self.logger.info("浏览器已关闭")
             except Exception as e:
                 self.logger.warning(f"关闭浏览器失败: {e}")
             finally:
-                # 清空引用，防止垃圾回收器重复清理
                 self._is_cleanup_done = True
                 self.driver = None
                 self.wait = None
@@ -278,23 +314,20 @@ class BrowserDriverManager:
         """强制关闭浏览器驱动（用于异常情况）"""
         if self.driver and not self._is_cleanup_done:
             try:
-                import os
-                import signal
-
-                # 尝试获取Chrome进程ID并强制结束
+                # 终止 chromedriver 进程（若可用）
                 try:
-                    if hasattr(self.driver, "_driver") and hasattr(
-                        self.driver._driver, "service"
-                    ):
+                    if hasattr(self.driver, "_driver") and hasattr(self.driver._driver, "service"):
                         service = self.driver._driver.service
                         if hasattr(service, "process"):
                             process = service.process
-                            if process and process.poll() is None:
+                            if process and getattr(process, "poll", lambda: None)() is None:
                                 process.terminate()
-                                process.wait(timeout=3)
+                                try:
+                                    process.wait(timeout=3)
+                                except Exception:
+                                    pass
                 except Exception:
                     pass
-
                 # 正常退出
                 self.driver.quit()
                 self.logger.info("浏览器已强制关闭")
@@ -306,13 +339,19 @@ class BrowserDriverManager:
                 self.wait = None
 
     def is_driver_alive(self) -> bool:
-        """检查驱动是否仍然活跃"""
         if not self.driver:
             return False
-
         try:
-            # 尝试获取当前URL来检查驱动是否仍然活跃
-            self.driver.current_url
+            _ = self.driver.current_url
             return True
         except Exception:
             return False
+
+
+if __name__ == "__main__":
+    # 简单自测：不会真正打开页面，仅尝试创建/退出
+    logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
+    mgr = BrowserDriverManager()
+    ok = mgr.create_driver({"headless": True})
+    print("create_driver:", ok)
+    mgr.quit_driver()
