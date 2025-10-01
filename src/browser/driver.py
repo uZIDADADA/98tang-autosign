@@ -1,12 +1,11 @@
 
 """
-浏览器驱动管理模块（已修复：自动匹配 Chrome/Chromedriver 主版本，失败后重试）
+浏览器驱动管理模块（已修复：自动匹配 Chrome/Chromedriver 主版本，失败后用 version_main 重试；不依赖 uc.install）
 
-功能亮点：
-- 支持 undetected_chromedriver (优先) 或标准 selenium
-- 捕获 "session not created" 版本不匹配错误，自动解析当前 Chrome 主版本并精确安装对应 chromedriver 后重试
-- 兼容 CI：自动附加稳定参数，可通过环境变量指定 Chrome 二进制
-- 安全关闭：SafeChrome 包装器避免 __del__/句柄异常
+- 首次用 undetected_chromedriver 正常启动
+- 若遇到 "session not created" 且报 Chrome 主版本不匹配：解析当前浏览器主版本，使用 uc.Chrome(version_main=<当前主版本>) 重试
+- 兼容 CI：附加稳定参数，可用 CHROME_BINARY / GOOGLE_CHROME_SHIM 指定 Chrome 可执行文件
+- SafeChrome 包装避免析构/句柄异常
 """
 
 import logging
@@ -14,7 +13,7 @@ import os
 import re
 from typing import Optional, Dict, Any
 
-# 浏览器自动化导入（优先使用 undetected_chromedriver）
+# 优先使用 undetected_chromedriver
 try:
     import undetected_chromedriver as uc
     from selenium.webdriver.common.by import By
@@ -26,15 +25,13 @@ try:
         WebDriverException,
     )
 
-    # 修复 undetected_chromedriver 的 __del__ 以防止句柄错误
+    # 修复 uc.__del__
     def safe_del(self):
-        """安全的析构方法，避免句柄无效错误"""
         try:
             if hasattr(self, "_is_patched") and self._is_patched:
                 return
         except Exception:
             pass
-
     if hasattr(uc.Chrome, "__del__"):
         uc.Chrome.__del__ = safe_del
 
@@ -42,7 +39,6 @@ try:
 except ImportError:
     try:
         from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import WebDriverWait
@@ -79,7 +75,6 @@ class SafeChrome:
     def quit(self):
         if not self._is_closed and self._driver:
             try:
-                # 标记已被安全关闭，防止 __del__ 重复处理
                 try:
                     self._driver._is_patched = True
                 except Exception:
@@ -164,10 +159,7 @@ class BrowserDriverManager:
 
         for arg in browser_args:
             try:
-                if UNDETECTED_AVAILABLE and hasattr(options, "add_argument"):
-                    options.add_argument(arg)
-                elif not UNDETECTED_AVAILABLE:
-                    options.add_argument(arg)
+                options.add_argument(arg)
                 self.logger.debug(f"添加浏览器参数: {arg}")
             except Exception:
                 pass
@@ -175,7 +167,6 @@ class BrowserDriverManager:
         # 浏览器偏好
         prefs = {
             "profile.default_content_setting_values": {"popups": 1},
-            # 中文字体配置
             "webkit.webprefs.fonts.standard.Hans": "SimSun",
             "webkit.webprefs.fonts.serif.Hans": "SimSun",
             "webkit.webprefs.fonts.sansserif.Hans": "SimHei",
@@ -195,6 +186,7 @@ class BrowserDriverManager:
             })
             self.logger.debug("配置 CI 环境中文字体偏好")
         try:
+            # uc 与 selenium 的 options 都支持 add_experimental_option
             options.add_experimental_option("prefs", prefs)
             self.logger.debug("配置浏览器偏好设置: 弹出窗口允许、中文字体支持")
         except Exception:
@@ -212,21 +204,21 @@ class BrowserDriverManager:
         return options
 
     def _init_driver_uc(self, options):
-        """优先用 undetected_chromedriver 初始化，遇版本不匹配自动重试"""
+        """
+        优先用 undetected_chromedriver 初始化；若版本不匹配，解析当前 Chrome 主版本并用 version_main 重试。
+        不依赖 uc.install（兼容老版本 uc）。
+        """
         try:
             return uc.Chrome(options=options)
         except Exception as e:
             msg = str(e)
-            # 从报错信息里提取 “driver 支持版本” 和 “当前浏览器版本”
+            # 典型报错：supports Chrome version XXX ... Current browser version is YYY
             m = re.search(
                 r"supports Chrome version\s*(\d+).*?Current browser version is\s*(\d+)",
                 msg,
                 flags=re.IGNORECASE | re.DOTALL,
             )
-            # 也兼容只出现 supports 或只出现 current 的情况
-            m_current = re.search(
-                r"Current browser version is\s*(\d+)", msg, flags=re.IGNORECASE
-            )
+            m_current = re.search(r"Current browser version is\s*(\d+)", msg, flags=re.IGNORECASE)
             curr_major = None
             if m and m.group(2):
                 curr_major = int(m.group(2))
@@ -235,41 +227,36 @@ class BrowserDriverManager:
 
             if curr_major:
                 self.logger.warning(
-                    f"检测到 Chrome/Chromedriver 主版本不匹配，按当前浏览器 {curr_major} 版本重试……"
+                    f"检测到 Chrome/Chromedriver 主版本不匹配，按当前浏览器 {curr_major} 版本重试（version_main）……"
                 )
-                # 精确安装匹配主版本的 chromedriver
-                driver_path = uc.install(version_main=curr_major)
-                return uc.Chrome(options=options, driver_executable_path=driver_path)
-
-            # 未能提取版本时，抛出原始异常
+                try:
+                    # 绝大多数 uc 版本都支持 version_main
+                    return uc.Chrome(options=options, version_main=curr_major)
+                except TypeError:
+                    # 极老版本 uc 可能不支持 version_main：最后一次直接重试（让底层自行解析）
+                    self.logger.warning("当前 undetected_chromedriver 不支持 version_main，回退到默认启动重试……")
+                    return uc.Chrome(options=options)
+            # 未能提取到主版本，抛出原异常
             raise
 
     def create_driver(self, config: Dict[str, Any]) -> bool:
-        """创建浏览器驱动（自动匹配版本）
-
-        Args:
-            config: 浏览器配置，如 {"headless": True}
-        Returns:
-            是否创建成功
-        """
+        """创建浏览器驱动（自动匹配版本）"""
         try:
             self.logger.info("开始创建浏览器驱动")
             headless = bool(config.get("headless", True))
             options = self._build_options(headless=headless)
 
-            # 创建驱动
             self.logger.debug("开始初始化浏览器实例")
             if UNDETECTED_AVAILABLE:
                 raw_driver = self._init_driver_uc(options)
             else:
-                # Selenium Manager 会自动解析并下载合适的驱动
-                raw_driver = webdriver.Chrome(options=options)
+                # 标准 selenium：交给 Selenium Manager 解决驱动（需新版本 selenium）
+                raw_driver = webdriver.Chrome(options=options)  # type: ignore[name-defined]
 
-            # 包装为安全驱动
             self.driver = SafeChrome(raw_driver)
             self.wait = WebDriverWait(self.driver, int(config.get("wait_timeout", 10)))
 
-            # 记录版本信息
+            # 打印版本信息
             try:
                 caps = getattr(self.driver, "capabilities", {}) or {}
                 browser_version = caps.get("browserVersion") or caps.get("version") or "Unknown"
@@ -349,7 +336,6 @@ class BrowserDriverManager:
 
 
 if __name__ == "__main__":
-    # 简单自测：不会真正打开页面，仅尝试创建/退出
     logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
     mgr = BrowserDriverManager()
     ok = mgr.create_driver({"headless": True})
