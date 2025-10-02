@@ -506,7 +506,7 @@ class HumanlikeBehavior:
         try:
             prompt = (
                 f"你是一个18禁的论坛用户，请基于帖子标题写一条简短自然的中文评论，"
-                f"要求长度在21到40之间，直接给结果。\n标题：{title}"
+                f"要求回复必须字数在25到40之间，直接给结果。\n标题：{title}"
             )
 
             resp = requests.post(
