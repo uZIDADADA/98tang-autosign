@@ -506,7 +506,7 @@ class HumanlikeBehavior:
         try:
             prompt = (
                 f"你是一个18禁的论坛用户，请基于帖子标题写一条简短自然的中文评论，"
-                f"要求长度在35到55字之间，直接给结果。\n标题：{title}"
+                f"要求长度在21到40之间，直接给结果。\n标题：{title}"
             )
 
             resp = requests.post(
@@ -537,7 +537,7 @@ class HumanlikeBehavior:
 
             # 🚨 校验：空、拒答、太短
             if (not reply_text
-                    or len(reply_text) < 30
+                    or len(reply_text) < 20
                     or any(kw in reply_text for kw in INVALID_KEYWORDS)):
                 self.logger.warning(f"DeepSeek 回复无效/过短/拒答: {reply_text}")
                 return random.choice(self.reply_messages) if self.reply_messages else "支持一下"
