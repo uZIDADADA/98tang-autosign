@@ -169,6 +169,19 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
+
+    # 固定安装 Chrome 141，避免与已用的 ChromeDriver 141 不匹配
+    - name: 安装 Chrome 141
+      uses: browser-actions/setup-chrome@v1
+      with:
+        chrome-version: '141'
+
+    - name: 显示浏览器/驱动版本（排查用）
+      run: |
+        which google-chrome || true
+        google-chrome --version || true
+        which chromedriver || true
+        chromedriver --version || true
         
     - name: 安装系统依赖和中文字体
       run: |
