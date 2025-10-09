@@ -30,6 +30,13 @@ jobs:
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
+    - name: Setup Chrome 141
+      uses: browser-actions/setup-chrome@v1
+      with:
+        chrome-version: '141'
+    - run: |
+        which google-chrome
+        google-chrome --version
       
     - name: 设置 Python 环境
       uses: actions/setup-python@v4
