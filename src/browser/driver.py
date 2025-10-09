@@ -125,11 +125,11 @@ class BrowserDriverManager:
             if UNDETECTED_AVAILABLE:
                 self.logger.info("使用undetected-chromedriver创建浏览器")
                 options = uc.ChromeOptions()
-                raw_driver = uc.Chrome(options=options, version_main=140)
+            
             else:
                 self.logger.info("使用标准selenium创建浏览器")
                 options = Options() if not UNDETECTED_AVAILABLE else uc.ChromeOptions()
-                raw_driver = webdriver.Chrome(options=options)
+               
 
             # 基础配置
             if headless:
