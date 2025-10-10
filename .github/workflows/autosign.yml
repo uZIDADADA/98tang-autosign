@@ -30,14 +30,7 @@ jobs:
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
-    - name: Setup Chrome 141
-      uses: browser-actions/setup-chrome@v1
-      with:
-        chrome-version: '141'
-    - run: |
-        which google-chrome
-        google-chrome --version
-      
+    
     - name: 设置 Python 环境
       uses: actions/setup-python@v4
       with:
@@ -59,18 +52,15 @@ jobs:
         echo "✅ 已安装的中文字体:"
         fc-list :lang=zh | head -5
         
+        # 更新 Chrome
+        echo "更新 Chrome"
+        sudo apt-get install -y google-chrome-stable
+        pip install --upgrade selenium webdriver-manager
+        
     - name: 安装Python依赖
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-
-    - name: 安装匹配版本的 Chrome 与 ChromeDriver
-      run: |
-        echo "📦 同步 Chrome 与 ChromeDriver 版本..."
-        python -m pip install chromedriver-autoinstaller
-        python -c "import chromedriver_autoinstaller; chromedriver_autoinstaller.install()"
-        google-chrome --version || true
-        chromedriver --version || true
         
     - name: 验证必需配置
       id: check_config
