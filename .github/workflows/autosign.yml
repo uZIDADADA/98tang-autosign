@@ -42,12 +42,17 @@ jobs:
         curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo apt-get install -y /tmp/chrome.deb
         google-chrome --version
+        # ✅ 关键：让系统默认的 google-chrome 指向 stable
+        sudo ln -sf /usr/bin/google-chrome-stable /usr/bin/google-chrome
+
+        echo "两者版本："
+        /usr/bin/google-chrome-stable --version
+        /usr/bin/google-chrome --version
     - name: 设置 CHROME_BINARY 环境变量
       run: |
         echo "CHROME_BINARY=/usr/bin/google-chrome-stable" >> $GITHUB_ENV
         echo "GOOGLE_CHROME_SHIM=/usr/bin/google-chrome-stable" >> $GITHUB_ENV
-        echo "✅ 当前 Chrome 版本:"
-        /usr/bin/google-chrome-stable --version
+       
         
     - name: 安装系统依赖和中文字体
       run: |
