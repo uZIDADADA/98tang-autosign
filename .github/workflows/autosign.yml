@@ -44,8 +44,10 @@ jobs:
         google-chrome --version
     - name: 设置 CHROME_BINARY 环境变量
       run: |
-        echo "CHROME_BINARY=/usr/bin/google-chrome" >> $GITHUB_ENV
-        echo "GOOGLE_CHROME_SHIM=/usr/bin/google-chrome" >> $GITHUB_ENV
+        echo "CHROME_BINARY=/usr/bin/google-chrome-stable" >> $GITHUB_ENV
+        echo "GOOGLE_CHROME_SHIM=/usr/bin/google-chrome-stable" >> $GITHUB_ENV
+        echo "✅ 当前 Chrome 版本:"
+        /usr/bin/google-chrome-stable --version
         
     - name: 安装系统依赖和中文字体
       run: |
