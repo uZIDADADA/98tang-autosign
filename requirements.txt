@@ -1,12 +1,12 @@
 # 核心依赖
-selenium>=4.15.0
+selenium>=4.15.0,<5
 python-dotenv>=1.0.0
 numpy>=1.24.0
 requests>=2.31.0
 
 # 增强反检测
-undetected-chromedriver>=3.5.5
+undetected-chromedriver>=3.5.5,<4
 setuptools  # 解决Python 3.12+的distutils问题
 
 # Chrome驱动自动管理
-webdriver-manager>=4.0.0
+#webdriver-manager>=4.0.0
